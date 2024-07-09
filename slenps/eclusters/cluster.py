@@ -1,222 +1,329 @@
-import numpy as np
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
-from sklearn.decomposition import PCA
-import umap
-from sklearn.metrics import silhouette_score, calinski_harabasz_score, davies_bouldin_score
-from typing import Union, List, Tuple, Dict, Optional, Any
-from sklearn.cluster import KMeans, AffinityPropagation, MeanShift, SpectralClustering
-from sklearn.cluster import AgglomerativeClustering, Birch
-from sklearn.base import ClusterMixin
- 
+"""
+This script provides utilities for clustering embeddings using various algorithms and evaluating their performance.
+It includes functions for clustering, loading models, finding the best algorithm, and sampling documents from clusters.
+"""
+
 import os
 import csv
+from typing import Union, List, Tuple, Dict, Optional, Any
+from collections import defaultdict
 from pprint import pprint
-from tqdm import tqdm 
 
-def sample(embeddings: np.ndarray, documents: np.ndarray, percent: float = 0.5) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Randomly samples a percentage of embeddings and documents.
-    
-    Args:
-        embeddings (np.ndarray): Array of embeddings.
-        documents (np.ndarray): Array of documents.
-        percent (float): Fraction of the data to sample (between 0 and 1).
-    
-    Returns:
-        Tuple[np.ndarray, np.ndarray]: Tuple containing sampled embeddings and documents.
-    
-    Raises:
-        ValueError: If 'percent' is not within the range (0, 1).
-    """
-    if not (0 < percent < 1):
-        raise ValueError('Percent must be between 0 and 1')
-    
-    sampled_embeddings, _, sampled_documents, _ = train_test_split(
-        embeddings, documents, train_size=percent, random_state=42
-    )
-    
-    return sampled_embeddings, sampled_documents
-
-
-
-def reduce_dimension(embeddings: np.ndarray, model_name: str = 'pca', n_dim: int = 2) -> np.ndarray:
-    """
-    Reduces the dimensionality of embeddings using PCA or UMAP.
-    
-    Args:
-        embeddings (np.ndarray): Array of embeddings.
-        model_name (str): Dimensionality reduction model to use ('pca' or 'umap').
-        n_dim (int): Number of dimensions to reduce to.
-    
-    Returns:
-        np.ndarray: Array of reduced embeddings.
-    """
-    if model_name == 'pca':
-        embeddings_standardized = StandardScaler().fit_transform(embeddings)
-        model = PCA(n_components=n_dim)
-        embeddings_reduced = model.fit_transform(embeddings_standardized)
-    elif model_name == 'umap':
-        model = umap.UMAP(n_components=n_dim)
-        embeddings_reduced = model.fit_transform(embeddings)
-    else:
-        raise ValueError("Model name must be 'pca' or 'umap'")
-    return embeddings_reduced
+import numpy as np
+import pandas as pd
+from tqdm import tqdm
+from sklearn.metrics import (
+    silhouette_score,
+    calinski_harabasz_score,
+    davies_bouldin_score,
+)
+from sklearn.cluster import (
+    KMeans,
+    AffinityPropagation,
+    MeanShift,
+    SpectralClustering,
+    AgglomerativeClustering,
+    Birch,
+)
+from sklearn.base import ClusterMixin
+from sklearn.metrics.pairwise import euclidean_distances
 
 
 def cluster(
-    embeddings: np.ndarray, 
-    model, 
-    metrics: List[str] = ['dbs'],
-    distance: str = 'euclidean',
+    embeddings: np.ndarray,
+    model: ClusterMixin,
+    metrics: List[str] = ["dbs"],
+    distance: str = "euclidean",
     return_model: bool = False,
-) -> Tuple[np.ndarray, Dict[str, float]]:
+) -> Union[
+    Tuple[np.ndarray, Dict[str, float]],
+    Tuple[np.ndarray, Dict[str, float], ClusterMixin],
+]:
     """
     Fits a clustering model to the embeddings and calculates specified metrics.
-    
+
     Args:
-        embeddings (np.ndarray): Array of embeddings.
-        model: A clustering model with the method .fit_transform
-        metrics (List[str]): List of metric names to calculate.
-        distance (str): Distance measure to use for silhouette score.
-    
+        embeddings: Array of embeddings.
+        model: A clustering model with the method .fit_predict.
+        metrics: List of metric names to calculate.
+        distance: Distance measure to use for silhouette score.
+        return_model: Whether to return the fitted model.
+
     Returns:
-        Tuple[np.ndarray, Dict[str, float]]: Tuple containing labels and calculated metrics.
+        Tuple containing labels, calculated metrics, and optionally the fitted model.
+
+    Raises:
+        ValueError: If only one label is predicted.
     """
     labels = model.fit_predict(embeddings)
     if len(np.unique(labels)) <= 1:
-        raise ValueError(f'Only {len(np.unique(labels))} labels are predicted. Increase data size or reduce cluster number.')
-    
+        raise ValueError(
+            f"Only {len(np.unique(labels))} labels are predicted. Increase data size or reduce cluster number."
+        )
+
     metric_funcs = {
-        'dbs': davies_bouldin_score,
-        'silhouette': lambda X, labels: silhouette_score(X, labels, metric=distance),
-        'calinski': calinski_harabasz_score
+        "dbs": davies_bouldin_score,
+        "silhouette": lambda x, labels: silhouette_score(x, labels, metric=distance),
+        "calinski": calinski_harabasz_score,
     }
-    
-    calculated_metrics = {}
-    for metric in metrics:
-        if metric in metric_funcs:
-            # print(embeddings)
-            # print(labels)
-            calculated_metrics[metric] = metric_funcs[metric](embeddings, labels)
-    if return_model:
-        return labels, calculated_metrics, model
 
-    return labels, calculated_metrics
-
-
-
-
-def get_clustering_model_dict():
-    model_dict = {
-        'kmeans': KMeans(n_init='auto'),
-        'affinity_propagation': AffinityPropagation(),
-        'mean_shift': MeanShift(),
-        'spectral_clustering': SpectralClustering(),
-        'agglomerative_clustering': AgglomerativeClustering(),
-        'birch': Birch(threshold=0.2),
+    calculated_metrics = {
+        metric: metric_funcs[metric](embeddings, labels)
+        for metric in metrics
+        if metric in metric_funcs
     }
-    return model_dict
 
-def load_clustering_model(model_name: str, model_dict: Dict[str, ClusterMixin] = None) -> ClusterMixin:
+    return (
+        (labels, calculated_metrics, model)
+        if return_model
+        else (labels, calculated_metrics)
+    )
+
+
+def get_clustering_model_dict() -> Dict[str, ClusterMixin]:
+    """
+    Returns a dictionary of clustering models.
+
+    Returns:
+        A dictionary mapping model names to model instances.
+    """
+    return {
+        "kmeans": KMeans(n_init="auto"),
+        "affinity_propagation": AffinityPropagation(),
+        "mean_shift": MeanShift(),
+        "spectral_clustering": SpectralClustering(),
+        "agglomerative_clustering": AgglomerativeClustering(),
+        "birch": Birch(threshold=0.2),
+    }
+
+
+def load_clustering_model(
+    model_name: str, model_dict: Optional[Dict[str, ClusterMixin]] = None
+) -> ClusterMixin:
     """
     Fetches a clustering model instance by its name from a given dictionary.
-    
+
     Args:
-        model_name (str): Name of the model to fetch.
-        models (Dict[str, ClusterMixin]): Dictionary mapping model names to model instances.
-    
+        model_name: Name of the model to fetch.
+        model_dict: Dictionary mapping model names to model instances.
+
     Returns:
-        ClusterMixin: Clustering model instance.
-    
+        Clustering model instance.
+
     Raises:
         ValueError: If the model name does not exist in the dictionary.
     """
-    if model_dict is None:
-        all_model_dict = get_clustering_model_dict()
-    else:
-        all_model_dict = get_clustering_model_dict()
+    all_model_dict = get_clustering_model_dict()
+    if model_dict is not None:
         all_model_dict.update(model_dict)
 
-    if model_name not in all_model_dict.keys():
+    if model_name not in all_model_dict:
         raise ValueError(f"Model {model_name} is not available.")
     return all_model_dict[model_name]
 
+
 def find_best_algorithm(
     embeddings: np.ndarray,
-    model_dict: Dict[str, Any] = None,
-    model_names: List[str] = ['kmeans', 'agglomerative_clustering'],
+    model_dict: Optional[Dict[str, Any]] = None,
+    model_names: List[str] = ["kmeans", "agglomerative_clustering"],
     min_cluster_num: int = 2,
     max_cluster_num: int = 5,
-    metrics: List[str] = ['dbs'],
-    test_metric: str = 'dbs',
+    metrics: List[str] = ["dbs"],
+    test_metric: str = "dbs",
     print_topk: bool = True,
     topk: int = 3,
-    result_filepath: str = 'clustering_results.csv',
-) -> List[Tuple[str, int, Dict[str, float]]]:
+    result_filepath: str = "clustering_results.csv",
+) -> List[Dict[str, Any]]:
     """
-    Finds the best clustering algorithm based on specified metrics, using a predefined dictionary of models.
-    
-    Args:
-        embeddings (np.ndarray): Array of embeddings.
-        models (Dict[str, ClusterMixin]): Dictionary mapping model names to model instances.
-        model_names (List[str]): List of model names to test.
-        min_cluster_num (int): Minimum number of clusters.
-        max_cluster_num (int): Maximum number of clusters.
-        metrics (List[str]): List of metric names to calculate.
-        test_metric (str): Metric name to sort results.
-        return_topk (bool): Whether to return only the top k results.
-        topk (int): Number of top results to return.
-    
-    Returns:
-        List[Tuple[str, int, Dict[str, float]]]: List of tuples containing model name, number of clusters, and metrics.
-    """
+    Finds the best clustering algorithm based on specified metrics.
 
+    Args:
+        embeddings: Array of embeddings.
+        model_dict: Dictionary mapping model names to model instances.
+        model_names: List of model names to test.
+        min_cluster_num: Minimum number of clusters.
+        max_cluster_num: Maximum number of clusters.
+        metrics: List of metric names to calculate.
+        test_metric: Metric name to sort results.
+        print_topk: Whether to print the top k results.
+        topk: Number of top results to print.
+        result_filepath: Path to save the results CSV file.
+
+    Returns:
+        List of dictionaries containing model name, number of clusters, and metrics.
+
+    Raises:
+        ValueError: If the result file already exists.
+    """
     if os.path.exists(result_filepath):
-        raise ValueError(f'{result_filepath} already exists.')
-    if model_dict is None:
-        model_dict = get_clustering_model_dict()
+        raise ValueError(f"{result_filepath} already exists.")
+
+    model_dict = model_dict or get_clustering_model_dict()
 
     results = []
+
     for model_name in model_names:
         if model_name not in model_dict:
-            print(f'{model_name} not included in model_dict')
-            continue  # Skip model names that are not in the dictionary
-        
-        model_base = load_clustering_model(model_name, model_dict) 
-        for cluster_num in tqdm(range(min_cluster_num, max_cluster_num + 1)):
-            
-            model = model_base.set_params(n_clusters=cluster_num) 
-            # print(cluster_num, model)
+            print(f"{model_name} not included in model_dict")
+            continue
+
+        model_base = load_clustering_model(model_name, model_dict)
+        for cluster_num in tqdm(
+            range(min_cluster_num, max_cluster_num + 1), leave=False
+        ):
+            model = model_base.set_params(n_clusters=cluster_num)
             try:
                 _, metrics_results = cluster(embeddings, model, metrics)
-                results_dict = {
-                    'model_name': model_name,
-                    'cluster_num': cluster_num,
-                    **metrics_results
-                }
+                results.append(
+                    {
+                        "model_name": model_name,
+                        "cluster_num": cluster_num,
+                        **metrics_results,
+                    }
+                )
+            except Exception:
+                results.append(
+                    {
+                        "model_name": model_name,
+                        "cluster_num": cluster_num,
+                        **{key: float("-inf") for key in metrics},
+                    }
+                )
 
-                results.append(results_dict)
-            except:
-                results_dict = {
-                    'model_name': model_name,
-                    'cluster_num': cluster_num,
-                    **{key: float('-inf') for key in metrics}
-                }
-                results.append(results_dict)
-
-
-    with open(result_filepath, 'w', newline='') as csvfile:
-        fieldnames = ['model_name', 'cluster_num'] + metrics
+    with open(result_filepath, "w", newline="") as csvfile:
+        fieldnames = ["model_name", "cluster_num"] + metrics
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
-        for result_dict in results:
-            # print(result_dict)
-            writer.writerow(result_dict)
+        writer.writerows(results)
 
-    print('save results')
-    # Sorting results based on the specified test metric.
-    results.sort(key=lambda x: x.get(test_metric, float('inf')))
+    metric_directions = {"dbs": False, "silhouette": True, "calinski": True}
+
+    print("Results saved")
+    results.sort(
+        key=lambda x: (
+            x[test_metric]
+            if metric_directions.get(test_metric, True)
+            else -x[test_metric]
+        )
+    )
     if print_topk:
         pprint(results[:topk])
     return results
+
+
+def sample_random_documents(
+    embeddings: np.ndarray,
+    documents: List[str],
+    cluster_num: int,
+    cluster_labels: Optional[np.ndarray] = None,
+    model: Optional[ClusterMixin] = None,
+    n_samples: int = 5,
+    verbose: bool = False,
+) -> pd.DataFrame:
+    """
+    Samples random documents from each cluster.
+
+    Args:
+        embeddings: Array of embeddings.
+        documents: List of document texts.
+        cluster_num: Number of clusters.
+        cluster_labels: Pre-computed cluster labels (optional).
+        model: Clustering model (optional, used if cluster_labels not provided).
+        n_samples: Number of samples per cluster.
+        verbose: Whether to print sampled documents.
+
+    Returns:
+        DataFrame with sampled documents and their cluster IDs.
+    """
+    if cluster_labels is None:
+        cluster_labels = model.fit_predict(embeddings)
+
+    sampled_docs_df = pd.DataFrame()
+
+    for cluster_id in range(cluster_num):
+        indices = np.where(cluster_labels == cluster_id)[0]
+        unique_documents = np.unique(np.array(documents)[indices])
+        tn_samples = min(n_samples, len(unique_documents))
+
+        sampled_docs = np.random.choice(
+            unique_documents, size=tn_samples, replace=False
+        )
+
+        cluster_data = pd.DataFrame(
+            {
+                "cluster_id": [cluster_id] * tn_samples,
+                "document": sampled_docs,
+            }
+        )
+
+        sampled_docs_df = pd.concat([sampled_docs_df, cluster_data], ignore_index=True)
+
+        if verbose:
+            print(f"cluster {cluster_id}")
+            print("\n".join(sampled_docs))
+            print()
+
+    return sampled_docs_df
+
+
+def sample_centroids_documents(
+    embeddings: np.ndarray,
+    documents: List[str],
+    cluster_num: int,
+    cluster_labels: Optional[np.ndarray] = None,
+    model: Optional[ClusterMixin] = None,
+    n_samples: int = 5,
+    verbose: bool = False,
+) -> pd.DataFrame:
+    """
+    Samples documents closest to cluster centroids.
+
+    Args:
+        embeddings: Array of embeddings.
+        documents: List of document texts.
+        cluster_num: Number of clusters.
+        cluster_labels: Pre-computed cluster labels (optional).
+        model: Clustering model (optional, used if cluster_labels not provided).
+        n_samples: Number of samples per cluster.
+        verbose: Whether to print sampled documents.
+
+    Returns:
+        DataFrame with sampled documents, their cluster IDs, and distances to centroids.
+    """
+    if cluster_labels is None:
+        cluster_labels = model.fit_predict(embeddings)
+    closest_docs_df = pd.DataFrame()
+
+    for cluster_id in range(cluster_num):
+        indices = np.where(cluster_labels == cluster_id)[0]
+        centroid = embeddings[indices].mean(axis=0).reshape(1, -1)
+        distances = euclidean_distances(embeddings[indices], centroid)
+        sorted_indices = np.argsort(distances.ravel())
+        unique_documents, unique_indices = np.unique(
+            np.array(documents)[indices[sorted_indices]], return_index=True
+        )
+
+        tn_samples = min(n_samples, len(unique_documents))
+
+        closest_indices = unique_indices[:tn_samples].tolist()
+        closest_docs = [unique_documents[i] for i in closest_indices]
+        closest_distances = distances[sorted_indices][unique_indices][
+            :tn_samples
+        ].ravel()
+
+        cluster_data = pd.DataFrame(
+            {
+                "cluster_id": [cluster_id] * tn_samples,
+                "document": closest_docs,
+                "distance_to_centroid": closest_distances,
+            }
+        )
+
+        closest_docs_df = pd.concat([closest_docs_df, cluster_data], ignore_index=True)
+
+        if verbose:
+            print(f"cluster {cluster_id}")
+            print("\n".join(closest_docs))
+            print()
+
+    return closest_docs_df
