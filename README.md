@@ -21,35 +21,44 @@ Cluster some word with chosen embedding and clustering models
 from slenps.eclusters import load_embedding_model, get_clustering_model_dict, load_clustering_model, cluster
 import numpy as np 
 
-# load documents
-
+## Obtain documents and embeddings
 with open('sample_documents.txt', 'r') as file:
     documents = np.array([line.strip() for line in file.readlines()])
 
-# embedding model
-embedding_model = load_embedding_model(
-    model_name = 'all-MiniLM-L6-v2', mode = 'huggingface',
-)
-# embedding_model = load_embedding_model(model_name='word2vec') 
+# get embedding model
+# embedding_model = load_embedding_model(
+#     model_name='all-MiniLM-L6-v2', mode='huggingface'
+# )
+embedding_model = load_embedding_model(model_name="Word2VecEM")
 
-# obtain embeddings 
+# embed documents
 embeddings = embedding_model.encode(documents)
+print(f"Embedding shape: {embeddings.shape}\nDocuments shape: {documents.shape}")
 
-# clustering model
-clustering_model = load_clustering_model('kmeans')
-clustering_model = clustering_model.set_params(n_clusters=3)
+
+## Clustering
+
+# Select a clustering model and number of clusters
+model_name = "kmeans"
+num_cluster = 3
+
+# create a clustering model
+clustering_model = load_clustering_model(model_name).set_params(n_clusters=num_cluster)
+clustering_model
 
 # fit the model and retrieve labels and metrics
 labels, metrics = cluster(
-    embeddings, clustering_model, 
-    metrics = ['dbs', 'calinski'],
+    embeddings,
+    clustering_model,
+    metrics=["dbs", "silhouette", "calinski"],
+    return_model=False,
 )
-print(metrics)
+print(f"Clustering metrics: {metrics}")
 
 # print sample result
 n_samples = 10
 for document, label in zip(documents[:n_samples], labels[:n_samples]):
-    print(f'{document} -> label {label}')
+    print(f"{document} --> Label {label}")
 ```
 
 ## Find the best algorithm and num_cluster 
@@ -62,29 +71,32 @@ model_names = ['kmeans', 'agglomerative_clustering', 'spectral_clustering']
 
 # find best algo and num_cluster using test_metric
 results = find_best_algorithm(
-	embeddings, model_names=model_names,
-	test_metric='dbs', metrics = ['dbs', 'silhouette'],
-	min_cluster_num=2, max_cluster_num=10,
-	result_filepath='sample_result_metrics.csv',
-	print_topk=True,
+    embeddings,
+    model_names=model_names,
+    metrics=["dbs", "silhouette"],
+    test_metric="dbs",
+    min_cluster_num=2,
+    max_cluster_num=10,
+    result_filepath="sample_result_metric.csv",
+    print_topk=True,
 )
 
 # view all results
-print(pd.DataFrame(results))
+pd.DataFrame(results)
 ```
 
 
 ## Supported models
-### 
+### Embedding models
 
 | embedding model | model_name | mode |
 | :- | :-: | :-: |
-| sklearn.feature.extraction.text.TfidfVectorizer | tfidf | None | 
-| gensim.models.Word2Vec | word2vec | None | 
-| gensim.models.Doc2Vec | doc2vec | None |
+| sklearn.feature.extraction.text.TfidfVectorizer | TfidfEM | None | 
+| gensim.models.Word2Vec | Word2VecEM | None | 
+| gensim.models.Doc2Vec | Doc2VecEM | None |
 | sentence_transformers.SentenceTransformer | Any | huggingface | 
 
-
+### Clustering models
 | clustering model | model_name | default params |
 | :- | :-: | :-: |
 | sklearn.cluster.KMeans | kmeans | n_init='auto' | 
@@ -93,3 +105,6 @@ print(pd.DataFrame(results))
 | sklearn.cluster.MeanShift | mean_shift | None | 
 | sklearn.cluster.AffinityPropagation | affinity_propagation | None | 
 | sklearn.cluster.Birch | birch | threshold=0.2 | 
+
+
+
