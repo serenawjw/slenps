@@ -19,7 +19,7 @@ import umap
 from slenps.eclusters.embedding_models import EmbeddingModelRegistry, BaseEmbeddingModel
 from slenps.utils import check_memory_usage
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
 
 

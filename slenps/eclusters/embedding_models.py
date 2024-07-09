@@ -12,7 +12,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from gensim.models import Word2Vec, Doc2Vec
 from sentence_transformers import SentenceTransformer
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
 
 
@@ -44,7 +44,7 @@ class EmbeddingModelRegistry(type):
         return cls.REGISTRY.get(name)
 
 
-class BaseEmbeddingModel(ABC, metaclass=EmbeddingModelRegistry):
+class BaseEmbeddingModel(metaclass=EmbeddingModelRegistry):
     """
     Abstract base class for all embedding models.
     """
